@@ -1,0 +1,39 @@
+# Build stage
+FROM golang:1.22-alpine AS builder
+
+RUN apk add --no-cache git
+
+WORKDIR /app
+
+COPY api/go.mod api/go.sum ./
+RUN go mod download
+
+COPY api/ .
+
+RUN CGO_ENABLED=0 GOOS=linux go build -o /server ./cmd/server/main.go
+
+# Runtime stage
+FROM alpine:3.19
+
+RUN apk add --no-cache ca-certificates curl unzip
+
+# Create directories
+RUN mkdir -p /opt/terraform/versions /var/lib/terraconsole/workspaces
+
+# Install a default terraform version
+ARG TERRAFORM_VERSION=1.7.5
+RUN curl -fsSL "https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_amd64.zip" \
+    -o /tmp/terraform.zip && \
+    mkdir -p "/opt/terraform/versions/${TERRAFORM_VERSION}" && \
+    unzip /tmp/terraform.zip -d "/opt/terraform/versions/${TERRAFORM_VERSION}" && \
+    chmod +x "/opt/terraform/versions/${TERRAFORM_VERSION}/terraform" && \
+    rm /tmp/terraform.zip
+
+# Create symlink for default version
+RUN ln -sf "/opt/terraform/versions/${TERRAFORM_VERSION}/terraform" /usr/local/bin/terraform
+
+COPY --from=builder /server /server
+
+EXPOSE 8080
+
+CMD ["/server"]

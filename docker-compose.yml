@@ -1,0 +1,89 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: terraconsole-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: terraconsole
+      POSTGRES_PASSWORD: terraconsole
+      POSTGRES_DB: terraconsole
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U terraconsole"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Redis
+  redis:
+    image: redis:7-alpine
+    container_name: terraconsole-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Go API Server
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    container_name: terraconsole-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      PORT: "8080"
+      DATABASE_URL: "postgres://terraconsole:terraconsole@postgres:5432/terraconsole?sslmode=disable"
+      REDIS_URL: "redis://redis:6379/0"
+      JWT_SECRET: "${JWT_SECRET:-change-me-in-production}"
+      ENCRYPTION_KEY: "${ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef}"
+      TERRAFORM_DIR: "/opt/terraform/versions"
+      WORKING_DIR: "/var/lib/terraconsole/workspaces"
+      ALLOWED_ORIGINS: "http://localhost,http://localhost:80,http://localhost:3000"
+    volumes:
+      - terraform_versions:/opt/terraform/versions
+      - workspace_data:/var/lib/terraconsole/workspaces
+    ports:
+      - "8080:8080"
+
+  # React Frontend
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    container_name: terraconsole-frontend
+    restart: unless-stopped
+    depends_on:
+      - api
+
+  # Nginx Reverse Proxy
+  nginx:
+    image: nginx:alpine
+    container_name: terraconsole-nginx
+    restart: unless-stopped
+    depends_on:
+      - api
+      - frontend
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+
+volumes:
+  postgres_data:
+  terraform_versions:
+  workspace_data:

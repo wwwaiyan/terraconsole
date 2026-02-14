@@ -17,6 +17,13 @@ const STATUS_CONFIG: Record<RunStatus, { label: string; class: string; icon: str
     planned_and_finished: { label: 'Plan Only', class: 'badge-success', icon: '📋' },
 };
 
+const VCS_PROVIDERS = [
+    { value: 'github', label: 'GitHub', icon: '🐙' },
+    { value: 'gitlab', label: 'GitLab', icon: '🦊' },
+    { value: 'bitbucket', label: 'Bitbucket', icon: '🪣' },
+    { value: 'azure_devops', label: 'Azure DevOps', icon: '🔷' },
+];
+
 export default function WorkspaceDetailPage() {
     const { workspaceId } = useParams<{ workspaceId: string }>();
     const navigate = useNavigate();
@@ -30,6 +37,31 @@ export default function WorkspaceDetailPage() {
     const [showVarModal, setShowVarModal] = useState(false);
     const [newRun, setNewRun] = useState({ operation: 'plan' as string, message: '' });
     const [newVar, setNewVar] = useState({ key: '', value: '', category: 'terraform' as string, sensitive: false, hcl: false, description: '' });
+
+    // VCS state
+    const [vcsEditing, setVcsEditing] = useState(false);
+    const [vcsSaving, setVcsSaving] = useState(false);
+    const [vcsConfig, setVcsConfig] = useState({
+        vcs_provider: 'github',
+        vcs_repo_url: '',
+        vcs_branch: 'main',
+        vcs_token: '',
+        vcs_working_directory: '',
+        vcs_auto_trigger: true,
+        vcs_file_trigger_patterns: '',
+    });
+
+    // Settings edit state
+    const [settingsEditing, setSettingsEditing] = useState(false);
+    const [settingsSaving, setSettingsSaving] = useState(false);
+    const [settingsForm, setSettingsForm] = useState({
+        name: '',
+        description: '',
+        terraform_version: '',
+        working_directory: '',
+        execution_mode: 'local',
+        auto_apply: false,
+    });
 
     useEffect(() => { loadAll(); }, [workspaceId]);
 
@@ -45,6 +77,25 @@ export default function WorkspaceDetailPage() {
             setRunList(runData || []);
             setVarList(varData || []);
             setStateVersions(stateData || []);
+            // Init settings form
+            setSettingsForm({
+                name: wsData.name || '',
+                description: wsData.description || '',
+                terraform_version: wsData.terraform_version || '',
+                working_directory: wsData.working_directory || '',
+                execution_mode: wsData.execution_mode || 'local',
+                auto_apply: wsData.auto_apply || false,
+            });
+            // Init VCS form
+            setVcsConfig({
+                vcs_provider: 'github',
+                vcs_repo_url: wsData.vcs_repo_url || '',
+                vcs_branch: wsData.vcs_branch || 'main',
+                vcs_token: '',
+                vcs_working_directory: wsData.working_directory || '',
+                vcs_auto_trigger: true,
+                vcs_file_trigger_patterns: '',
+            });
         } catch { } finally { setLoading(false); }
     };
 
@@ -92,25 +143,62 @@ export default function WorkspaceDetailPage() {
         } catch (err: any) { toast.error(err.message); }
     };
 
+    const handleSaveSettings = async () => {
+        setSettingsSaving(true);
+        try {
+            await workspaces.update(workspaceId!, settingsForm);
+            toast.success('Settings saved!');
+            setSettingsEditing(false);
+            loadAll();
+        } catch (err: any) { toast.error(err.message); }
+        finally { setSettingsSaving(false); }
+    };
+
+    const handleSaveVCS = async () => {
+        setVcsSaving(true);
+        try {
+            await workspaces.update(workspaceId!, {
+                vcs_repo_url: vcsConfig.vcs_repo_url,
+                vcs_branch: vcsConfig.vcs_branch,
+            });
+            toast.success('VCS settings saved!');
+            setVcsEditing(false);
+            loadAll();
+        } catch (err: any) { toast.error(err.message); }
+        finally { setVcsSaving(false); }
+    };
+
+    const handleDisconnectVCS = async () => {
+        if (!confirm('Disconnect VCS repository? Runs will no longer be triggered by commits.')) return;
+        try {
+            await workspaces.update(workspaceId!, { vcs_repo_url: '', vcs_branch: '' });
+            toast.success('VCS disconnected');
+            setVcsConfig({ ...vcsConfig, vcs_repo_url: '', vcs_branch: 'main' });
+            loadAll();
+        } catch (err: any) { toast.error(err.message); }
+    };
+
     if (loading || !workspace) {
         return <div className="loading-page"><div className="loading-spinner loading-spinner-lg"></div></div>;
     }
 
+    const hasVCS = !!workspace.vcs_repo_url;
+
     return (
         <div>
             <div className="page-header">
-                <div>
+                <div style={{ minWidth: 0 }}>
                     <div className="text-xs text-muted" style={{ marginBottom: 4, cursor: 'pointer' }}
                         onClick={() => navigate(`/projects/${workspace.project_id}/workspaces`)}>
                         ← Back to Workspaces
                     </div>
-                    <h1 className="page-title flex items-center gap-md">
+                    <h1 className="page-title flex items-center gap-md" style={{ flexWrap: 'wrap' }}>
                         {workspace.name}
                         {workspace.locked && <span className="badge badge-warning">🔒 Locked</span>}
                     </h1>
                     <p className="page-subtitle">{workspace.description || 'No description'}</p>
                 </div>
-                <div className="flex gap-md">
+                <div className="flex gap-md" style={{ flexWrap: 'wrap', flexShrink: 0 }}>
                     <button className="btn btn-secondary" onClick={handleLockToggle}>
                         {workspace.locked ? '🔓 Unlock' : '🔒 Lock'}
                     </button>
@@ -142,13 +230,13 @@ export default function WorkspaceDetailPage() {
 
             {/* Tabs */}
             <div className="tabs">
-                {['runs', 'variables', 'state', 'settings'].map(tab => (
+                {['runs', 'variables', 'state', 'vcs', 'settings'].map(tab => (
                     <button
                         key={tab}
                         className={`tab ${activeTab === tab ? 'active' : ''}`}
                         onClick={() => setActiveTab(tab)}
                     >
-                        {tab.charAt(0).toUpperCase() + tab.slice(1)}
+                        {tab === 'vcs' ? '🔗 VCS' : tab.charAt(0).toUpperCase() + tab.slice(1)}
                     </button>
                 ))}
             </div>
@@ -203,7 +291,7 @@ export default function WorkspaceDetailPage() {
             {/* Variables Tab */}
             {activeTab === 'variables' && (
                 <div>
-                    <div className="flex justify-between items-center mb-lg">
+                    <div className="flex justify-between items-center mb-lg" style={{ flexWrap: 'wrap', gap: '8px' }}>
                         <h3 className="font-semibold">Workspace Variables</h3>
                         <button className="btn btn-primary btn-sm" onClick={() => setShowVarModal(true)}>
                             + Add Variable
@@ -225,7 +313,7 @@ export default function WorkspaceDetailPage() {
                                     <div className={v.sensitive ? 'var-sensitive' : 'var-value'}>
                                         {v.sensitive ? '***SENSITIVE***' : v.value || '(empty)'}
                                     </div>
-                                    <div className="flex gap-sm">
+                                    <div className="flex gap-sm" style={{ flexWrap: 'wrap' }}>
                                         <span className="var-badge">{v.category}</span>
                                         {v.sensitive && <span className="var-badge" style={{ color: 'var(--color-warning)' }}>🔒 secret</span>}
                                         {v.hcl && <span className="var-badge">HCL</span>}
@@ -276,27 +364,319 @@ export default function WorkspaceDetailPage() {
                 </div>
             )}
 
+            {/* VCS Tab */}
+            {activeTab === 'vcs' && (
+                <div>
+                    {/* VCS Connection Status */}
+                    <div className="card mb-lg">
+                        <div className="card-header">
+                            <h3 className="card-title">🔗 Version Control Integration</h3>
+                            {hasVCS && !vcsEditing && (
+                                <div className="flex gap-sm">
+                                    <button className="btn btn-secondary btn-sm" onClick={() => setVcsEditing(true)}>
+                                        ✏️ Edit
+                                    </button>
+                                    <button className="btn btn-danger btn-sm" onClick={handleDisconnectVCS}>
+                                        Disconnect
+                                    </button>
+                                </div>
+                            )}
+                        </div>
+
+                        {hasVCS && !vcsEditing ? (
+                            <div>
+                                {/* Connected status */}
+                                <div className="vcs-status mb-lg">
+                                    <div className="vcs-status-dot connected"></div>
+                                    <div className="vcs-provider-icon">🐙</div>
+                                    <div className="vcs-info">
+                                        <div className="vcs-repo-name">{workspace.vcs_repo_url}</div>
+                                        <div className="vcs-branch">Branch: {workspace.vcs_branch || 'main'}</div>
+                                    </div>
+                                    <span className="badge badge-success">Connected</span>
+                                </div>
+
+                                <div className="grid grid-2">
+                                    <div className="form-group">
+                                        <label className="form-label">Repository URL</label>
+                                        <input className="form-input form-input-mono" value={workspace.vcs_repo_url} readOnly />
+                                    </div>
+                                    <div className="form-group">
+                                        <label className="form-label">Branch</label>
+                                        <input className="form-input form-input-mono" value={workspace.vcs_branch || 'main'} readOnly />
+                                    </div>
+                                </div>
+
+                                <div className="card" style={{ background: 'var(--color-bg-elevated)', marginTop: '16px' }}>
+                                    <h4 className="text-sm font-semibold mb-md" style={{ color: 'var(--color-text-primary)' }}>
+                                        ⚡ Trigger Behavior
+                                    </h4>
+                                    <div className="text-sm text-muted">
+                                        <p>• Pushes to <code style={{ color: 'var(--color-cyan)', fontFamily: 'var(--font-mono)', background: 'var(--color-bg-input)', padding: '2px 6px', borderRadius: '4px' }}>{workspace.vcs_branch || 'main'}</code> will trigger a plan</p>
+                                        <p style={{ marginTop: '4px' }}>• Merge/pull requests will generate speculative plans</p>
+                                        <p style={{ marginTop: '4px' }}>• {workspace.auto_apply ? '✅ Auto-apply is enabled' : '⏸️ Plans require manual approval'}</p>
+                                    </div>
+                                </div>
+                            </div>
+                        ) : (
+                            <div>
+                                {/* Connect or Edit VCS */}
+                                {!hasVCS && !vcsEditing && (
+                                    <div className="empty-state">
+                                        <div className="empty-state-icon">🔗</div>
+                                        <h3 className="empty-state-title">No VCS Connection</h3>
+                                        <p className="empty-state-message">
+                                            Connect a Git repository to automatically trigger runs on code changes.
+                                            Supports GitHub, GitLab, Bitbucket, and Azure DevOps.
+                                        </p>
+                                        <button className="btn btn-primary" onClick={() => setVcsEditing(true)}>
+                                            🔗 Connect Repository
+                                        </button>
+                                    </div>
+                                )}
+
+                                {vcsEditing && (
+                                    <div style={{ animation: 'slideUp 0.3s ease-out' }}>
+                                        <div className="form-group">
+                                            <label className="form-label">VCS Provider</label>
+                                            <div className="grid grid-4" style={{ gap: '8px' }}>
+                                                {VCS_PROVIDERS.map(p => (
+                                                    <button
+                                                        key={p.value}
+                                                        type="button"
+                                                        className="card card-clickable"
+                                                        style={{
+                                                            padding: '12px',
+                                                            textAlign: 'center',
+                                                            borderColor: vcsConfig.vcs_provider === p.value ? 'var(--color-accent)' : 'var(--color-border)',
+                                                            background: vcsConfig.vcs_provider === p.value ? 'rgba(124, 58, 237, 0.08)' : 'var(--color-bg-card)',
+                                                        }}
+                                                        onClick={() => setVcsConfig({ ...vcsConfig, vcs_provider: p.value })}
+                                                    >
+                                                        <div style={{ fontSize: '1.5rem', marginBottom: '4px' }}>{p.icon}</div>
+                                                        <div className="text-xs font-semibold">{p.label}</div>
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        </div>
+
+                                        <div className="form-group">
+                                            <label className="form-label">Repository URL</label>
+                                            <input
+                                                className="form-input form-input-mono"
+                                                placeholder="https://github.com/org/repo"
+                                                value={vcsConfig.vcs_repo_url}
+                                                onChange={e => setVcsConfig({ ...vcsConfig, vcs_repo_url: e.target.value })}
+                                            />
+                                        </div>
+
+                                        <div className="grid grid-2">
+                                            <div className="form-group">
+                                                <label className="form-label">Branch</label>
+                                                <input
+                                                    className="form-input form-input-mono"
+                                                    placeholder="main"
+                                                    value={vcsConfig.vcs_branch}
+                                                    onChange={e => setVcsConfig({ ...vcsConfig, vcs_branch: e.target.value })}
+                                                />
+                                            </div>
+                                            <div className="form-group">
+                                                <label className="form-label">Working Directory</label>
+                                                <input
+                                                    className="form-input form-input-mono"
+                                                    placeholder="/ (root)"
+                                                    value={vcsConfig.vcs_working_directory}
+                                                    onChange={e => setVcsConfig({ ...vcsConfig, vcs_working_directory: e.target.value })}
+                                                />
+                                            </div>
+                                        </div>
+
+                                        <div className="form-group">
+                                            <label className="form-label">Personal Access Token</label>
+                                            <input
+                                                className="form-input form-input-mono"
+                                                type="password"
+                                                placeholder="ghp_xxxxxxxxxxxx"
+                                                value={vcsConfig.vcs_token}
+                                                onChange={e => setVcsConfig({ ...vcsConfig, vcs_token: e.target.value })}
+                                            />
+                                            <div className="text-xs text-muted" style={{ marginTop: '4px' }}>
+                                                Token needs repo read access. Stored encrypted at rest.
+                                            </div>
+                                        </div>
+
+                                        <div className="form-group">
+                                            <label className="form-label">File Trigger Patterns (optional)</label>
+                                            <input
+                                                className="form-input form-input-mono"
+                                                placeholder="**/*.tf, modules/**"
+                                                value={vcsConfig.vcs_file_trigger_patterns}
+                                                onChange={e => setVcsConfig({ ...vcsConfig, vcs_file_trigger_patterns: e.target.value })}
+                                            />
+                                            <div className="text-xs text-muted" style={{ marginTop: '4px' }}>
+                                                Comma-separated glob patterns. Only file changes matching these patterns will trigger runs.
+                                            </div>
+                                        </div>
+
+                                        <div className="form-group">
+                                            <label className="form-checkbox">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={vcsConfig.vcs_auto_trigger}
+                                                    onChange={e => setVcsConfig({ ...vcsConfig, vcs_auto_trigger: e.target.checked })}
+                                                />
+                                                Automatic run triggering — Start a plan when changes are pushed
+                                            </label>
+                                        </div>
+
+                                        <div className="flex gap-md" style={{ flexWrap: 'wrap' }}>
+                                            <button className="btn btn-primary" onClick={handleSaveVCS} disabled={vcsSaving || !vcsConfig.vcs_repo_url}>
+                                                {vcsSaving ? '⏳ Saving...' : hasVCS ? '💾 Update Connection' : '🔗 Connect Repository'}
+                                            </button>
+                                            <button className="btn btn-secondary" onClick={() => setVcsEditing(false)}>
+                                                Cancel
+                                            </button>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Webhook Info */}
+                    {hasVCS && (
+                        <div className="card">
+                            <h3 className="card-title mb-lg">🪝 Webhook Configuration</h3>
+                            <p className="text-sm text-muted mb-md">
+                                Configure a webhook in your repository to receive push events:
+                            </p>
+                            <div className="form-group">
+                                <label className="form-label">Webhook URL</label>
+                                <div className="flex gap-sm">
+                                    <input
+                                        className="form-input form-input-mono"
+                                        value={`${window.location.origin}/api/webhooks/vcs/${workspaceId}`}
+                                        readOnly
+                                        onClick={e => {
+                                            (e.target as HTMLInputElement).select();
+                                            navigator.clipboard.writeText(`${window.location.origin}/api/webhooks/vcs/${workspaceId}`);
+                                            toast.success('Copied webhook URL!');
+                                        }}
+                                        style={{ cursor: 'pointer' }}
+                                    />
+                                </div>
+                            </div>
+                            <div className="form-group">
+                                <label className="form-label">Content Type</label>
+                                <input className="form-input" value="application/json" readOnly />
+                            </div>
+                            <div className="form-group">
+                                <label className="form-label">Events</label>
+                                <div className="flex gap-sm" style={{ flexWrap: 'wrap' }}>
+                                    <span className="badge badge-info">Push</span>
+                                    <span className="badge badge-info">Pull Request</span>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            )}
+
             {/* Settings Tab */}
             {activeTab === 'settings' && (
                 <div>
                     <div className="card mb-lg">
-                        <h3 className="card-title mb-lg">Workspace Settings</h3>
+                        <div className="card-header">
+                            <h3 className="card-title">Workspace Settings</h3>
+                            {!settingsEditing ? (
+                                <button className="btn btn-secondary btn-sm" onClick={() => setSettingsEditing(true)}>
+                                    ✏️ Edit
+                                </button>
+                            ) : (
+                                <div className="flex gap-sm">
+                                    <button
+                                        className="btn btn-primary btn-sm"
+                                        onClick={handleSaveSettings}
+                                        disabled={settingsSaving}
+                                    >
+                                        {settingsSaving ? '⏳' : '💾'} Save
+                                    </button>
+                                    <button className="btn btn-secondary btn-sm" onClick={() => setSettingsEditing(false)}>Cancel</button>
+                                </div>
+                            )}
+                        </div>
                         <div className="grid grid-2">
                             <div className="form-group">
                                 <label className="form-label">Workspace Name</label>
-                                <input className="form-input" value={workspace.name} readOnly />
+                                <input
+                                    className="form-input"
+                                    value={settingsEditing ? settingsForm.name : workspace.name}
+                                    readOnly={!settingsEditing}
+                                    onChange={e => setSettingsForm({ ...settingsForm, name: e.target.value })}
+                                />
                             </div>
                             <div className="form-group">
                                 <label className="form-label">Terraform Version</label>
-                                <input className="form-input form-input-mono" value={workspace.terraform_version} readOnly />
+                                <input
+                                    className="form-input form-input-mono"
+                                    value={settingsEditing ? settingsForm.terraform_version : workspace.terraform_version}
+                                    readOnly={!settingsEditing}
+                                    onChange={e => setSettingsForm({ ...settingsForm, terraform_version: e.target.value })}
+                                />
                             </div>
                             <div className="form-group">
                                 <label className="form-label">Working Directory</label>
-                                <input className="form-input form-input-mono" value={workspace.working_directory} readOnly />
+                                <input
+                                    className="form-input form-input-mono"
+                                    value={settingsEditing ? settingsForm.working_directory : workspace.working_directory}
+                                    readOnly={!settingsEditing}
+                                    onChange={e => setSettingsForm({ ...settingsForm, working_directory: e.target.value })}
+                                    placeholder="/ (root)"
+                                />
                             </div>
                             <div className="form-group">
                                 <label className="form-label">Execution Mode</label>
-                                <input className="form-input" value={workspace.execution_mode} readOnly />
+                                {settingsEditing ? (
+                                    <select
+                                        className="form-input form-select"
+                                        value={settingsForm.execution_mode}
+                                        onChange={e => setSettingsForm({ ...settingsForm, execution_mode: e.target.value })}
+                                    >
+                                        <option value="local">Local</option>
+                                        <option value="agent">Agent</option>
+                                    </select>
+                                ) : (
+                                    <input className="form-input" value={workspace.execution_mode} readOnly />
+                                )}
+                            </div>
+                            <div className="form-group">
+                                <label className="form-label">Description</label>
+                                {settingsEditing ? (
+                                    <textarea
+                                        className="form-input"
+                                        value={settingsForm.description}
+                                        onChange={e => setSettingsForm({ ...settingsForm, description: e.target.value })}
+                                        rows={2}
+                                        placeholder="Optional description..."
+                                    />
+                                ) : (
+                                    <input className="form-input" value={workspace.description || '—'} readOnly />
+                                )}
+                            </div>
+                            <div className="form-group">
+                                <label className="form-label">Auto Apply</label>
+                                {settingsEditing ? (
+                                    <label className="form-checkbox" style={{ marginTop: '8px' }}>
+                                        <input
+                                            type="checkbox"
+                                            checked={settingsForm.auto_apply}
+                                            onChange={e => setSettingsForm({ ...settingsForm, auto_apply: e.target.checked })}
+                                        />
+                                        Automatically apply successful plans
+                                    </label>
+                                ) : (
+                                    <input className="form-input" value={workspace.auto_apply ? 'Enabled' : 'Disabled'} readOnly />
+                                )}
                             </div>
                         </div>
                     </div>

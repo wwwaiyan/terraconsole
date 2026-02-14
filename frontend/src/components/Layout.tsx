@@ -15,6 +15,20 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         loadOrgs();
     }, []);
 
+    // Auto-close sidebar on route change (mobile)
+    useEffect(() => {
+        setSidebarOpen(false);
+    }, [location.pathname]);
+
+    // Close sidebar on Escape key
+    useEffect(() => {
+        const handler = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') setSidebarOpen(false);
+        };
+        window.addEventListener('keydown', handler);
+        return () => window.removeEventListener('keydown', handler);
+    }, []);
+
     const loadOrgs = async () => {
         try {
             const data = await orgs.list() as Organization[];
@@ -26,10 +40,18 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
     return (
         <div className="app-layout">
-            {/* Mobile overlay */}
+            {/* Mobile overlay with blur */}
             {sidebarOpen && (
                 <div
-                    style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 99 }}
+                    style={{
+                        position: 'fixed',
+                        inset: 0,
+                        background: 'rgba(0,0,0,0.6)',
+                        backdropFilter: 'blur(4px)',
+                        WebkitBackdropFilter: 'blur(4px)',
+                        zIndex: 99,
+                        animation: 'fadeIn 0.2s ease-out',
+                    }}
                     onClick={() => setSidebarOpen(false)}
                 />
             )}
@@ -46,19 +68,19 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                         <p className="sidebar-section-title">Navigation</p>
                         <button
                             className={`sidebar-link ${location.pathname === '/' ? 'active' : ''}`}
-                            onClick={() => { navigate('/'); setSidebarOpen(false); }}
+                            onClick={() => navigate('/')}
                         >
                             <span className="icon">📊</span> Dashboard
                         </button>
                         <button
                             className={`sidebar-link ${isActive('/organizations') ? 'active' : ''}`}
-                            onClick={() => { navigate('/organizations'); setSidebarOpen(false); }}
+                            onClick={() => navigate('/organizations')}
                         >
                             <span className="icon">🏢</span> Organizations
                         </button>
                         <button
                             className={`sidebar-link ${isActive('/settings') ? 'active' : ''}`}
-                            onClick={() => { navigate('/settings'); setSidebarOpen(false); }}
+                            onClick={() => navigate('/settings')}
                         >
                             <span className="icon">⚙️</span> Settings
                         </button>
@@ -71,7 +93,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                                 <button
                                     key={org.id}
                                     className={`sidebar-link ${isActive(`/organizations/${org.id}`) ? 'active' : ''}`}
-                                    onClick={() => { navigate(`/organizations/${org.id}/projects`); setSidebarOpen(false); }}
+                                    onClick={() => navigate(`/organizations/${org.id}/projects`)}
                                 >
                                     <span className="icon">📁</span> {org.display_name || org.name}
                                 </button>
@@ -99,12 +121,11 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                 <header className="topbar">
                     <div className="topbar-left">
                         <button
-                            className="btn btn-ghost btn-sm"
+                            className="btn btn-ghost btn-sm mobile-menu-btn"
                             onClick={() => setSidebarOpen(!sidebarOpen)}
-                            style={{ display: 'none' }}
-                            id="mobile-menu-btn"
+                            aria-label="Toggle menu"
                         >
-                            ☰
+                            {sidebarOpen ? '✕' : '☰'}
                         </button>
                         <div className="topbar-breadcrumb">
                             <span>TerraConsole</span>
@@ -123,10 +144,11 @@ export default function Layout({ children }: { children: React.ReactNode }) {
             </main>
 
             <style>{`
-        @media (max-width: 768px) {
-          #mobile-menu-btn { display: flex !important; }
-        }
-      `}</style>
+                .mobile-menu-btn { display: none !important; }
+                @media (max-width: 768px) {
+                    .mobile-menu-btn { display: flex !important; font-size: 1.25rem; }
+                }
+            `}</style>
         </div>
     );
 }
